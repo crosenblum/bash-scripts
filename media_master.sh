@@ -3,17 +3,60 @@
 #created by Craig M. Rosenblum
 #email address crosenblum@gmail.com
 
+#feature list for each mode
+#
+#movies feature list
+#-download fanart
+#--fanart sources
+#--TheMovieDB.org
+#--imdb.com
+#--ofdbe.de
+#--fanart.tv
+#--htbackdrops.com
+#--moviebackdrops.com
+#--movieposterdb.com
+#-download subtitles
+#-download trailers
+#-create xbmc compatible nfo
+#-create mediaportal compatible nfo
+#-rename movie and movie folder
+
+
 #setup variables
 showselect="Yes"
 mode="movies"
 curdir=${PWD##*/} 
-path=$PWD
+mypath=$PWD
 pathmatch="No"
 cron="No"
 debug="No"
 
+#the script below is to help check if software is installed or not
+#from http://stackoverflow.com/questions/20815433/how-can-i-check-in-a-bash-script-if-some-software-is-installed-or-not
+iscmd() {
+    command -v >&- "$@"
+}
+
+checkdeps() {
+    local -i not_found
+    for cmd; do
+        iscmd "$cmd" || { 
+        	#return 1 if not found
+            return 1
+        }
+    done
+	
+	#return 0 if found
+    return 0
+}
+
+read_dom () {
+	local IFS=\>
+	read -d \< ENTITY CONTENT
+}
+
 #declare debug function
-debug() {
+function debug {
 
 	#now show debug of settings/statue
 	echo
@@ -29,8 +72,84 @@ debug() {
 	echo 
 }
 
+#help menu
+function helpmenu {
+
+	echo
+	echo :::::::::::::::::::::::::::::::::
+	echo :::::::: Help Menu  :::::::::::::
+	echo :::::::::::::::::::::::::::::::::
+	echo
+	echo Usage: media_manager.sh [mode] [path of movie or tv show folder]
+	echo
+	echo Mode Reference [Used to determine how to process path specified]:
+	echo t = TV Shows
+	echo m = Movies
+	echo
+	echo Example:
+	echo media_manager.sh m /folder/movies
+	echo media_manager.sh t /folder/tvshows
+	echo
+	echo Depedencies:
+	echo [1] FileBot is the ultimate tool for renaming your movies, tv shows 
+	echo   or anime and downloading subtitles.
+	echo [2] youtube-dl is a small command-line program to download videos 
+	echo   from YouTube.com and a few more sites.
+	echo
+	echo
+}
+
+#download movie trailer
+#download movie trailer
+function trailer {
+
+	
+	#get base folder of current folder
+	root="$(basename "$1")"
+	f="$1"
+	trailer_id=""
+	
+	YTB_URL="https://www.youtube.com/watch?v="
+
+	#set trailer filename
+	save_path="$f/trailer.ext"
+	
+	#display current movie working on
+	#echo "$root"
+
+	#check if there is a movie.nfo 		
+	if [ -f "$f/movie.nfo" ]; then
+
+		while read_dom; do
+				if [[ $ENTITY = "trailer" ]]; then
+		
+					#extract videoid from trailer url
+					trailer_id="$(echo $CONTENT | awk -F'[=&]' '{print $4}')"
+
+				fi
+			done < "$f/movie.nfo"
+			
+			#echo "Trailer ID: [$trailer_id]"
+
+	fi
+
+	#check if trailer_id is set
+	if [ ! -z "$trailer_id" ]; then
+
+		#debug info
+		echo "--[Download Movie Trailer]"
+
+		#setup youtube-dl
+		#echo "$YTB_URL$trailer_id"
+		#echo "$save_path"
+		echo youtube-dl -f "$YTB_URL$trailer_id" -o "$save_path" --restrict-filenames --console-title -f mp4 --add-metadata --sub-lang en --embed-subs --embed-thumbnail --all-subs
+
+	fi
+
+}
+
 #declare movie handling function
-movies() {
+function do_movies {
 
 	#essential variables for this to work
 	video_type_list="avi,mkv,mp4,wmv,mpg,vob"
@@ -38,24 +157,24 @@ movies() {
 	#manually change this if needed
 	filebotpath="/usr/bin/X11/filebot"
 
-	#Quality to download. To get the accepted value run; youtube-dl -F parameter to get a list of formats
-	#Multiple formats as 22/18/12
-	Q=18
-
 	#Base Url for video download
 	YTB_URL="https://www.youtube.com/watch?v="
+	
+	#setup do count
+	do_count=0
 
 	#check if parameter is a folder
 	if [[ -d $1 ]]; then
 	
 		#display banner of movie manager
-		echo
-		echo :::::::::::::::::::::::::::::::::
-		echo :::::::: Movie Manager ::::::::::
-		echo :::::::::::::::::::::::::::::::::
-		echo
+		#echo
+		#echo :::::::::::::::::::::::::::::::::
+		#echo :::::::: Movie Manager ::::::::::
+		#echo :::::::::::::::::::::::::::::::::
+		#echo
 
 		echo "Scanning for movies..."
+		echo
 
 		#now let's do the work needed
 		for f in $1/*
@@ -78,97 +197,152 @@ movies() {
 					#echo "--[Renaming Movie Folder]"
 					$filebotpath -script fn:renall "$f" -non-strict --db TheMovieDB --def target=folder >/dev/null 2>&1
 
-					#download artwork for movies
-					#echo "--[Download FanArt / Create NFO]"
-					$filebotpath -script fn:artwork.tmdb "$f" -non-strict --conflict override >/dev/null 2>&1
+					#check if fanart in the folder
+					count=`ls -1 *.jpg 2>/dev/null | wc -l`
 
-					#run filebot to get subtitles
-					#echo "--[Download Subtitles]"
-					$filebothpath -get-missing-subtitles "$f">/dev/null 2>&1
-		
+					if [ $count = 0 ]; then
 
+						#download artwork for movies
+						echo "--[Download FanArt / Create NFO]"
+						$filebotpath -script fn:artwork.tmdb "$f" -non-strict --conflict override >/dev/null 2>&1
+						do_count=$((do_count+1))
+
+					fi
+
+					#check if subtitles in the folder
+					count=`ls -1 *.srt 2>/dev/null | wc -l`
+
+					if [ $count != 0 ]; then
+
+						#run filebot to get subtitles
+						echo "--[Download Subtitles]"
+						$filebothpath -get-missing-subtitles "$f">/dev/null 2>&1
+						do_count=$((do_count+1))
+
+					fi
+					
+					#check if there is a movie.nfo 		
+					if [ -f "$1/$root/movie.nfo" ]; then
+
+						#get full current path
+						#echo "--[Download Movie Trailer]"
+						trailer "$1/$root"
+						do_count=$((do_count+1))
+						
+					fi
+					
+					#loop to end of do_count
+					for i in {1..$do_count}
+					do
+
+						#delay 1 second
+						sleep 2
+	
+						#move up one line then echo blank
+						tput cuu1
+						echo "                                                         "
+
+						#move up one line and clear
+						tput cuu1 cuu1 el
+
+					done
+					
 				done
 
 			done
 
 		done
 
-		#script from https://forums.plex.tv/index.php/topic/116913-script-to-download-trailers-missing-from-your-library/
-		#look for trailer named movie trailers in movie root folder
-		find $1 -mindepth 2 -maxdepth 2 -type d '!' -exec sh -c 'ls -1 "{}"|egrep -i -q "trailer\.(mp4|avi)$"' ';' -print | while read dir
-		do
-
-			#get the movie id from the movie.nfo file
-			ID=$(awk -F "[><]" '/trailer/{print $3}' "$dir/movie.nfo")
-			
-			#download the youtube trailer for this movie							
-			youtube-dl -f $Q $YTB_URL$ID -o "$dir/%(title)s-trailer.%(ext)s" --restrict-filenames --console-title -f mp4 --add-metadata --sub-lang en --embed-subs --embed-thumbnail --all-subs
-			
-		done						
-	
 	fi
 	
 }
 
+function do_tvshows {
 
-#check which mode we are in
-if echo $curdir | grep -iq "Movies"; then
+	#essential variables for this to work
+	video_type_list="avi,mkv,mp4,wmv,mpg,vob"
 
-    #set mode to movies
-    mode="movies"
+	#manually change this if needed
+	filebotpath="/usr/bin/X11/filebot"
 
-	#set pathmatch to yes so I know that we are in the right folder
-	pathmatch="Yes"
-    
-fi
+	#Base Url for video download
+	YTB_URL="https://www.youtube.com/watch?v="
 
-if echo $curdir | grep -iq "TV Shows"; then
+	#check if parameter is a folder
+	if [[ -d $1 ]]; then
+	
+		#display banner of tvshows manager
+		echo
+		echo :::::::::::::::::::::::::::::::::
+		echo ::::::: TV Shows Manager ::::::::
+		echo :::::::::::::::::::::::::::::::::
+		echo
 
-    #set mode to movies
-    mode="tvshows"
+		echo "Scanning for movies..."
+		echo
 
-	#set pathmatch to yes so I know that we are in the right folder
-	pathmatch="Yes"
+		#now let's do the work needed
+		for f in $1/*
+		do
 
-fi
+			#look for video files inside current folder
+			for type in ${video_type_list//,/ }; do
+	
+				#now do a find, and pipe the results to a file inside current starting folder
+				find "$f" -type f -name \*.$type -print | while read f; do
 
-if echo $curdir | grep -iq "TVShows"; then
+					#get base folder of current folder
+					root="$(dirname "$f")"
+					root="$(basename "$root")"
+					
+					#display current tvshow working on
+					echo "$root"
 
-    #set mode to movies
-    mode="tvshows"
+					#rename folders -script fn:renall "path/to/movies" -non-strict --db TheMovieDB --def target=folder
+					#echo "--[Renaming Movie Folder]"
+					$filebotpath -script fn:renall "$f" -non-strict --db TheMovieDB --def target=folder >/dev/null 2>&1
 
-	#set pathmatch to yes so I know that we are in the right folder
-	pathmatch="Yes"
+					#check if fanart in the folder
+					count=`ls -1 *.jpg 2>/dev/null | wc -l`
 
-fi
+					if [ $count = 0 ]; then
 
-#check for parameters
-if [ ! -z $1 ]; then 
+						#download artwork for movies
+						echo "--[Download FanArt / Create NFO]"
+						$filebotpath -script fn:artwork.tmdb "$f" -non-strict --conflict override >/dev/null 2>&1
 
-	#check fi tv show or movies mode
-	if echo $1 | grep -iq "m"; then
-		#set mode to movies
-		mode="movies"
+					fi
+
+					#check if subtitles in the folder
+					count=`ls -1 *.srt 2>/dev/null | wc -l`
+
+					if [ $count != 0 ]; then
+
+						#run filebot to get subtitles
+						echo "--[Download Subtitles]"
+						$filebothpath -get-missing-subtitles "$f">/dev/null 2>&1
+
+					fi
+					
+					#check if there is a movie.nfo 		
+					if [ -f "$1/$root/movie.nfo" ]; then
+
+						#get full current path
+						#echo "--[Download Movie Trailer]"
+						trailer "$1/$root"
+						
+					fi
+					
+				done
+
+			done
+
+		done
+
 	fi
 
-	if echo $1 | grep -iq "t"; then
-		#set mode to movies
-		mode="tvshows"
-	fi
+}
 
-fi
-
-if [ ! -z $2 ]; then 
-
-	#get path to be operating
-	if [[ -d $2 ]]; then
-	
-		#set path to this parameters value
-		path=$2
-	
-	fi
-	
-fi
 
 #check if run as cron or not
 if [[ $- == *i* ]]; then
@@ -181,22 +355,63 @@ else
 
 fi
 
+#check for each paramter
+for i in $*; do
+
+	if [[ -d "${i}" ]]; then
+		echo "$i is a directory"
+	elif [[ -f "${i}" ]]; then
+		echo "$i is a file"
+	fi
+
+	#check if this paramter is a directory
+	if [[ -d "${i}" ]]; then
+
+		#set path to this paramter
+		mypath="$i"
+
+	fi
+
+	#check if tv show or movies mode
+	if echo $i | grep -iq "m"; then
+
+		#set mode to movies
+		mode="movies"
+		showselect="no"
+
+	fi
+
+	if echo $i | grep -iq "t"; then
+
+		#set mode to movies
+		mode="tvshows"
+		showselect="no"
+
+	fi
+
+
+	#echo $i 
+done
+
 #show documentation intro
+clear
 echo :::::::::::::::::::::::::::::::::
 echo :::::::::: Media Manager ::::::::
 echo :::::::::::::::::::::::::::::::::
+echo
+showselect="Yes"
 
 #check if show select menu
 if [ $showselect == "Yes" ]; then
 
 	PS3='Select one: '
-	options=("Movies" "TV Shows" "Quit")
+	options=("Movies" "TV Shows" "Help" "Quit")
 	select opt in "${options[@]}"
 	do
 		case $opt in
 		    "Movies")
 		        #echo "you chose choice 1"
-		        mode="movies"
+		        do_movies "$mypath"
 		        break
 		        ;;
 		    "TV Shows")
@@ -204,6 +419,11 @@ if [ $showselect == "Yes" ]; then
 		        mode="tvshows"
 		        break
 		        ;;
+		    "Help")
+		    	#echo "you choise choice 3"
+		    	helpmenu
+		    	break
+		    	;;
 		    "Quit")
 		        break
 		        ;;
@@ -216,26 +436,18 @@ if [ $showselect == "Yes" ]; then
 	
 fi
 
-#different options for different modes
-case $mode in
-	"movies")
-		#execute movies mode
-		movies "$path"
-		;;
-	"tvshows")
-		#execute tvshows mode
-		echo tvshows $path
-		;;
-	*) echo invalid option;;		        
-esac
+# ----------------------------------------------
+# Trap CTRL+C, CTRL+Z and quit singles
+# ----------------------------------------------
+#trap '' SIGINT SIGQUIT SIGTSTP
 
 #debug="Yes"
 
 #check if debug mode is on
 if [ $debug == "Yes" ]; then
 
-	#call debug function and pass correct parameters
-	debug $curdir $mode $path $showselect $cron
+	#call debug and pass correct parameters
+	debug $curdir $mode $mypath $showselect $cron
 
 fi
 
